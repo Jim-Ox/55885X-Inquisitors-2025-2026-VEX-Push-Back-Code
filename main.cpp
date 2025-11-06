@@ -1,19 +1,24 @@
 #include "main.h"
 #include "lemlib/api.hpp" // LemLib functionality
+#include <map>
 
 // --------- CONTROLLER ---------
 pros::Controller controller(pros::E_CONTROLLER_MASTER);
 
-// --------- MOTORS ---------
-pros::MotorGroup leftMotors({-5, 4, -3}, pros::MotorGearset::blue);
-pros::MotorGroup rightMotors({6, -9, 7}, pros::MotorGearset::blue);
+// --------- DRIVE MOTORS ---------
+pros::MotorGroup leftMotors({1, -2, 3}, pros::MotorGearset::blue);
+pros::MotorGroup rightMotors({-11, 12, -13}, pros::MotorGearset::blue);
 
+// --------- INTAKE MOTORS ---------
+// Intake motors for stage 1 and stage 2
+pros::Motor intakeStage1(8, pros::E_MOTOR_GEARSET_06, false); // normal direction
+pros::Motor intakeStage2(9, pros::E_MOTOR_GEARSET_06, true);  // reversed direction
 // --------- SENSORS ---------
 pros::Imu imu(10);
-
-// Tracking wheels
 pros::Rotation horizontalEnc(20);
 pros::Rotation verticalEnc(-11);
+
+// --------- TRACKING WHEELS ---------
 lemlib::TrackingWheel horizontal(&horizontalEnc, lemlib::Omniwheel::NEW_275, -5.75);
 lemlib::TrackingWheel vertical(&verticalEnc, lemlib::Omniwheel::NEW_275, -2.5);
 
@@ -21,13 +26,13 @@ lemlib::TrackingWheel vertical(&verticalEnc, lemlib::Omniwheel::NEW_275, -2.5);
 lemlib::Drivetrain drivetrain(
     &leftMotors,
     &rightMotors,
-    10,               // Track width
+    10,               // Track width in inches
     lemlib::Omniwheel::NEW_4,
     360,              // Max RPM
     2                 // Horizontal drift
 );
 
-// --------- CONTROLLERS (PID) ---------
+// --------- PID CONTROLLERS ---------
 lemlib::ControllerSettings linearController(10, 0, 3, 3, 1, 100, 3, 500, 20);
 lemlib::ControllerSettings angularController(2, 0, 10, 3, 1, 100, 3, 500, 0);
 
@@ -40,36 +45,68 @@ lemlib::Chassis chassis(
     linearController,
     angularController,
     sensors,
-    nullptr, // We will use lambda-based exponential drive instead of LemLib curves
+    nullptr,
     nullptr
 );
 
+// --------- CONFIGURABLE SETTINGS ---------
+const int joystickDeadzone = 7;
+const int rampStep = 8;
+const double imuCorrectionGain = 0.05;
+const double expoExponent = 1.5; // Exponential drive strength
+
+// --------- HELPER FUNCTIONS ---------
+inline int applyExponential(int input, double exponent = expoExponent) {
+    double sign = (input >= 0) ? 1.0 : -1.0;
+    double absInput = abs(input);
+    double output = pow(absInput / 127.0, exponent) * 127.0;
+    return static_cast<int>(output * sign);
+}
+
 // --------- INITIALIZATION ---------
 void initialize() {
-    pros::lcd::initialize();  // Brain LCD
-    chassis.calibrate();       // Calibrate IMU and odometry
+    pros::lcd::initialize();  
+    pros::lcd::set_text(0, "Initializing...");
 
-    // Thread to display robot position
+    // --- Start-Up Delay ---
+    pros::delay(1000);
+
+    // --- Sensor Resets ---
+    imu.reset();
+    if (imu.is_calibrating()) {
+        pros::lcd::set_text(0, "Calibrating IMU...");
+        pros::delay(2000);
+    }
+
+    horizontalEnc.reset_position();
+    verticalEnc.reset_position();
+
+    // --- LemLib Calibration ---
+    chassis.calibrate();
+
+    //Rotate coordinate frame so forward = +X and right = +Y
+    chassis.setPose(0, 0, -90);
+
+    pros::lcd::set_text(0, "Initialization Complete :)");
+
+    // --- Live Odometry Display ---
     pros::Task screenTask([]() {
         while (true) {
             auto pose = chassis.getPose();
-            pros::lcd::print(0, "X: %.2f", pose.x);
-            pros::lcd::print(1, "Y: %.2f", pose.y);
-            pros::lcd::print(2, "Theta: %.2f", pose.theta);
-            pros::delay(50); // 20 FPS
+            pros::lcd::print(1, "X: %.2f", pose.x);
+            pros::lcd::print(2, "Y: %.2f", pose.y);
+            pros::lcd::print(3, "Theta: %.2f°", pose.theta);
+            pros::delay(50);
         }
     });
 }
-
 void disabled() {}
 void competition_initialize() {}
 
-// --------- DRIVER CONTROL (OPCONTROL) ---------
+// ------------ DRIVER CONTROL -----------//
 void opcontrol() {
     static int lastLeft = 0;
     static int lastRight = 0;
-    const int rampStep = 8;          // Smooth acceleration step
-    const double imuCorrectionGain = 0.05; // IMU straight-line correction
 
     while (true) {
         // --- READ JOYSTICKS ---
@@ -77,8 +114,8 @@ void opcontrol() {
         int rightY = controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y);
 
         // --- DEADZONE ---
-        if (abs(leftY) < 5) leftY = 0;
-        if (abs(rightY) < 5) rightY = 0;
+        if (abs(leftY) < joystickDeadzone) leftY = 0;
+        if (abs(rightY) < joystickDeadzone) rightY = 0;
 
         // --- RAMP FILTER ---
         leftY = lastLeft + std::clamp(leftY - lastLeft, -rampStep, rampStep);
@@ -86,36 +123,52 @@ void opcontrol() {
         lastLeft = leftY;
         lastRight = rightY;
 
-        // --- SPEED MODE ---
-        double speedMultiplier = controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1) ? 0.5 : 1.0;
+        // --- SPEED MODES ---
+        double speedMultiplier = 1.0;
+       if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1)) 
+    speedMultiplier = 1.27;     // Turbo priority
+else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) 
+    speedMultiplier = 0.5;      // Precision
+else 
+    speedMultiplier = 1.0;      // Normal
 
-        // --- EXPONENTIAL DRIVE CURVE ---
-        auto applyExpo = [](int input) -> int {
-            double sign = (input >= 0) ? 1.0 : -1.0;
-            double absInput = abs(input);
-            double output = pow(absInput / 127.0, 1.5) * 127.0; // smooth start, strong top
-            return static_cast<int>(output * sign);
-        };
-        leftY = applyExpo(leftY);
-        rightY = applyExpo(rightY);
-
-        // --- IMU DRIFT CORRECTION ---
-        double headingError = imu.get_rotation() - chassis.getPose().theta;
-        double correction = headingError * imuCorrectionGain;
-        leftY -= static_cast<int>(correction);
-        rightY += static_cast<int>(correction);
+        // --- APPLY EXPONENTIAL CURVE ---
+        leftY = applyExponential(leftY);
+        rightY = applyExponential(rightY);
 
         // --- DRIVE TANK ---
         chassis.tank(leftY * speedMultiplier, rightY * speedMultiplier);
 
+        // --- INTAKE CONTROL ---
+        // Intake motors: intakeStage1 (port 8), intakeStage2 (port 9)
+        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
+            // Intake in
+            intakeStage1.move(127);
+            intakeStage2.move(-127); // opposite direction
+        } 
+        else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
+            // Outtake
+            intakeStage1.move(-127);
+            intakeStage2.move(127);
+        } 
+        else {
+            // Stop intake
+            intakeStage1.brake();
+            intakeStage2.brake();
+        }
+
         // --- TELEMETRY ---
         pros::lcd::print(0, "Left: %d | Right: %d", leftY, rightY);
-        pros::lcd::print(1, "Speed Mode: %s", speedMultiplier == 1.0 ? "Turbo" : "Precision");
+        pros::lcd::print(1, "Speed Mode: %s", 
+            controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1) ? "TURBO" :
+            (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1) ? "Precision" : "Normal"));
+        pros::lcd::print(2, "Intake: %s",
+            controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2) ? "In" :
+            (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2) ? "Out" : "Stopped"));
 
         pros::delay(10);
     }
 }
 
-// --------- AUTONOMOUS---------
-void autonomous() {
-}
+// --------- AUTONOMOUS ---------
+void autonomous() {}
