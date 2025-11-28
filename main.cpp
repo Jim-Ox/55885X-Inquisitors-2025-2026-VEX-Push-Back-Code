@@ -25,6 +25,9 @@ pros::adi::DigitalOut Park1('C', false); // Park Piston left on port C
 pros::adi::DigitalOut Park2('D', false); // Park Piston right on port
 pros::adi::DigitalOut LTC('H', false); // LTC deploy piston on port H
 
+//optical sensor
+pros::Optical opticalSensor(13); // Optical sensor on port 13
+
 // Inertial Sensor on port 10
 pros::Imu imu(20);
 
@@ -104,6 +107,8 @@ void initialize() {
     pros::lcd::initialize(); // initialize brain screen
     chassis.calibrate(); // calibrate sensors
 
+    opticalSensor.set_led_pwm(100); // set LED brightness to max
+    
     // the default rate is 50. however, if you need to change the rate, you
     // can do the following.
     // lemlib::bufferedStdout().setRate(...);
@@ -175,131 +180,23 @@ void autonomous() {
     pros::lcd::print(4, "pure pursuit finished!");
 }
 
-/**
- * Runs in driver control
- */
- double driveHeading = 0;
-
 void opcontrol() {
     
-    //pneumatic states
-    bool DescoreState = false;
-    bool ParkState = false;
-    bool LTCState = false;
-
-    // static so they persist between iterations but are local to this function
-    static double driveHeading = 0.0;
-    static bool headingLocked = false;
-
     while (true) {
-        // joystick read
-        int leftY = controller.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y);
-        int rightY = controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y);
-
+        
         // =====================================================================
-        // ======================= IMU STRAIGHT LINE ASSIST =====================
+        // ============================ CHASSIS DRIVE ===========================
         // =====================================================================
-
-        double currentHeading = imu.get_rotation(); // 0..360 range
-
-        // driving straight if both sticks pushed similarly (threshold adjustable)
-        bool drivingStraight = (std::abs(leftY) > 20 && std::abs(rightY) > 20);
-
-        // lock heading ONCE when we start driving straight
-        if (drivingStraight && !headingLocked) {
-            driveHeading = currentHeading;
-            headingLocked = true;
-        }
-        // unlock heading when not driving straight
-        else if (!drivingStraight) {
-            headingLocked = false;
-        }
-
-        double correction = 0.0;
-
-        // apply correction only when heading is locked
-        if (headingLocked) {
-            double error = driveHeading - currentHeading;
-
-            // wraparound fix (-180..180)
-            if (error > 180.0) error -= 360.0;
-            if (error < -180.0) error += 360.0;
-
-            double kP = 1.2; // tune this
-            correction = error * kP;
-
-            // clamp correction so driver still retains control
-            if (correction > 20.0) correction = 20.0;
-            if (correction < -20.0) correction = -20.0;
-        }
-
-        // apply correction to tank drive (right, left)
-        chassis.tank(rightY - (int)correction, leftY + (int)correction);
-
+        ChassisDrive();
+       
         // =====================================================================
         // ============================ INTAKE & PNEU ===========================
         // =====================================================================
 
-        // intake motor controls
-        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1)) {
-            intakeMotor1.move_velocity(600);
-            intakeMotor2.move_velocity(600);
-            intakeMotor3.move_velocity(600);
-        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
-            intakeMotor1.move_velocity(-600);
-            intakeMotor2.move_velocity(-600);
-            intakeMotor3.move_velocity(-600);
-        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) {
-            intakeMotor1.move_velocity(600);
-            intakeMotor2.move_velocity(600);
-            intakeMotor3.move_velocity(-600);
-        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
-            intakeMotor1.move_velocity(-600);
-            intakeMotor2.move_velocity(-600);
-            intakeMotor3.move_velocity(600);
-        } else {
-            intakeMotor1.move_velocity(0);
-            intakeMotor2.move_velocity(0);
-            intakeMotor3.move_velocity(0);
-        }
+        intakeControl(); // call intake control function
 
-        // descore pneumatics
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_Y)) {
-            if (DescoreState == false) {
-                Descore1.set_value(true);
-                Descore2.set_value(true);
-                DescoreState = true;
-            } else {
-                Descore1.set_value(false);
-                Descore2.set_value(false);
-                DescoreState = false;
-            }
-        }
-
-        // park pneumatics
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_RIGHT)) {
-            if (ParkState == false) {
-                Park1.set_value(true);
-                Park2.set_value(true);
-                ParkState = true;
-            } else {
-                Park1.set_value(false);
-                Park2.set_value(false);
-                ParkState = false;
-            }
-        }
-
-        // LTC pneumatic
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_B)) {
-            if (LTCState == false) {
-                LTC.set_value(true);
-                LTCState = true;
-            } else {
-                LTC.set_value(false);
-                LTCState = false;
-            }
-        }
-
+        pneumaticsControl(); // call pneumatics control function
+        
         pros::delay(10);
     }
 }
