@@ -1,69 +1,119 @@
 #include "main.h"
-#include "lemlib/api.hpp" // LemLib functionality
-#include <map>
+#include "lemlib/api.hpp" // IWYU pragma: keep
+#include "lemlib/chassis/trackingWheel.hpp"
+#include "pros/misc.h"
+#include "pros/motors.hpp"
+#include "pros/rtos.hpp"
+#include "pros/adi.hpp"
 
-// --------- CONTROLLER ---------
+// controller
 pros::Controller controller(pros::E_CONTROLLER_MASTER);
 
-// --------- DRIVE MOTORS ---------
-pros::MotorGroup leftMotors({1, -2, 3}, pros::MotorGearset::blue);
-pros::MotorGroup rightMotors({-11, 12, -13}, pros::MotorGearset::blue);
+// motor groups
+pros::MotorGroup leftMotors({1, 2, -3}, pros::MotorGearset::blue); // left motor group - ports 3 (reversed), 4, 5 (reversed)
+pros::MotorGroup rightMotors({-4, -6, 7}, pros::MotorGearset::blue); // right motor group - ports 6, 7, 9 (reversed)
 
-// --------- INTAKE MOTORS ---------
-// Intake motors for stage 1 and stage 2
-pros::Motor intakeStage1(8, pros::E_MOTOR_GEARSET_06, false); // normal direction
-pros::Motor intakeStage2(9, pros::E_MOTOR_GEARSET_06, true);  // reversed direction
-// --------- SENSORS ---------
-pros::Imu imu(10);
-pros::Rotation horizontalEnc(20);
-pros::Rotation verticalEnc(-11);
+//Intake motors
+pros::Motor intakeMotor1(8, pros::MotorGearset::blue); // Intake motor on port 8
+pros::Motor intakeMotor2(-9, pros::MotorGearset::green); // Intake motor on port 9
+pros::Motor intakeMotor3(10, pros::MotorGearset::green); // Indexer motor on port 10
 
-// --------- TRACKING WHEELS ---------
-lemlib::TrackingWheel horizontal(&horizontalEnc, lemlib::Omniwheel::NEW_275, -5.75);
-lemlib::TrackingWheel vertical(&verticalEnc, lemlib::Omniwheel::NEW_275, -2.5);
+// pneumatics
+pros::adi::DigitalOut Descore1('A', false); // Descore Piston left on port A
+pros::adi::DigitalOut Descore2('B', false); // Descore Piston right on port B
+pros::adi::DigitalOut Park('C', false); // Park Piston left on port C
+pros::adi::DigitalOut Pistonlift('D', false); // Intake lift Piston right on port
+pros::adi::DigitalOut LTC('H', false); // LTC deploy piston on port H
 
-// --------- DRIVETRAIN ---------
-lemlib::Drivetrain drivetrain(
-    &leftMotors,
-    &rightMotors,
-    10,               // Track width in inches
-    lemlib::Omniwheel::NEW_4,
-    360,              // Max RPM
-    2                 // Horizontal drift
+//optical sensor
+pros::Optical opticalSensor(13); // Optical sensor on port 13
+
+// Inertial Sensor on port 10
+pros::Imu imu(20);
+
+// Create motor objects
+// note its important to include the motor gearset otherwise the gear ratio will be incorrect
+pros::Motor lF(1, pros::E_MOTOR_GEARSET_06); // left front motor. port 5, reversed
+pros::Motor lM(2, pros::E_MOTOR_GEARSET_06); // left middle motor. port 4
+pros::Motor lB(-3, pros::E_MOTOR_GEARSET_06); // left back motor. port 3, reversed
+pros::Motor rF(-4, pros::E_MOTOR_GEARSET_06); // right front motor. port 6, reversed
+pros::Motor rM(-6, pros::E_MOTOR_GEARSET_06); // right middle motor. port 7, reversed
+pros::Motor rB(7, pros::E_MOTOR_GEARSET_06); // right back motor. port 9
+
+// create a motor group for the left side of the drivetrain
+pros::MotorGroup leftMotorsOdom({lF, lM, lB});
+pros::MotorGroup rightMotorsOdom({rF, rM, rB});
+// Create a new tracking wheel using the left motor group
+// it's using an new 3.25 wheel
+// and its distance is half the track width of the drivetrain
+// distance is also negative because the left drive side is to the left of the tracking center
+// if it was to the right of the tracking center, we would use a positive distance
+// the rpm is 450
+lemlib::TrackingWheel leftTrackingWheel(&leftMotorsOdom, lemlib::Omniwheel::NEW_325, -4.961101, 450);
+lemlib::TrackingWheel rightTrackingWheel(&rightMotorsOdom, lemlib::Omniwheel::NEW_325, 4.961101, 450);
+
+// drivetrain settings
+lemlib::Drivetrain drivetrain(&leftMotors, // left motor group
+                              &rightMotors, // right motor group
+                              9.922202, // 9.922202 inch track width
+                              lemlib::Omniwheel::NEW_325, // using new 3.25" omnis
+                              450, // drivetrain rpm is 450
+                              8 // horizontal drift is 2. If we had traction wheels, it would have been 8
 );
 
-// --------- PID CONTROLLERS ---------
-lemlib::ControllerSettings linearController(10, 0, 3, 3, 1, 100, 3, 500, 20);
-lemlib::ControllerSettings angularController(2, 0, 10, 3, 1, 100, 3, 500, 0);
-
-// --------- ODOMETRY ---------
-lemlib::OdomSensors sensors(&vertical, nullptr, &horizontal, nullptr, &imu);
-
-// --------- CHASSIS ---------
-lemlib::Chassis chassis(
-    drivetrain,
-    linearController,
-    angularController,
-    sensors,
-    nullptr,
-    nullptr
+// lateral motion controller
+lemlib::ControllerSettings linearController(10, // proportional gain (kP)
+                                            0, // integral gain (kI)
+                                            3, // derivative gain (kD)
+                                            3, // anti windup
+                                            1, // small error range, in inches
+                                            100, // small error range timeout, in milliseconds
+                                            3, // large error range, in inches
+                                            500, // large error range timeout, in milliseconds
+                                            20 // maximum acceleration (slew)
 );
 
-// --------- CONFIGURABLE SETTINGS ---------
-const int joystickDeadzone = 7;
-const int rampStep = 8;
-const double imuCorrectionGain = 0.05;
-const double expoExponent = 1.5; // Exponential drive strength
+// angular motion controller
+lemlib::ControllerSettings angularController(2, // proportional gain (kP)
+                                             0, // integral gain (kI)
+                                             10, // derivative gain (kD)
+                                             3, // anti windup
+                                             1, // small error range, in degrees
+                                             100, // small error range timeout, in milliseconds
+                                             3, // large error range, in degrees
+                                             500, // large error range timeout, in milliseconds
+                                             0 // maximum acceleration (slew)
+);
 
-// --------- HELPER FUNCTIONS ---------
-inline int applyExponential(int input, double exponent = expoExponent) {
-    double sign = (input >= 0) ? 1.0 : -1.0;
-    double absInput = abs(input);
-    double output = pow(absInput / 127.0, exponent) * 127.0;
-    return static_cast<int>(output * sign);
-}
+// sensors for odometry
+lemlib::OdomSensors sensors(&vertical, // vertical tracking wheel
+                            nullptr, // vertical tracking wheel 2, set to nullptr as we don't have a second one
+                            &horizontal, // horizontal tracking wheel
+                            nullptr, // horizontal tracking wheel 2, set to nullptr as we don't have a second one
+                            &imu // inertial sensor
+);
 
-// --------- INITIALIZATION ---------
+// input curve for throttle input during driver control
+lemlib::ExpoDriveCurve throttleCurve(3, // joystick deadband out of 127
+                                     10, // minimum output where drivetrain will move out of 127
+                                     1.019 // expo curve gain
+);
+
+// input curve for steer input during driver control
+lemlib::ExpoDriveCurve steerCurve(3, // joystick deadband out of 127
+                                  10, // minimum output where drivetrain will move out of 127
+                                  1.019 // expo curve gain
+);
+
+// create the chassis
+lemlib::Chassis chassis(drivetrain, linearController, angularController, sensors, &throttleCurve, &steerCurve);
+
+/**
+ * Runs initialization code. This occurs as soon as the program is started.
+ *
+ * All other competition modes are blocked by initialize; it is recommended
+ * to keep execution time for this mode under a few seconds.
+ */
 void initialize() {
     pros::lcd::initialize();  
     pros::lcd::set_text(0, "Initializing...");
@@ -100,75 +150,42 @@ void initialize() {
         }
     });
 }
-void disabled() {}
-void competition_initialize() {}
+void disabled() {
 
-// ------------ DRIVER CONTROL -----------//
+}
+
+void competition_initialize() {
+}
+
+// get a path used for pure pursuit
+// this needs to be put outside a function
+ASSET(example_txt); // '.' replaced with "_" to make c++ happy
+
+/**
+ * Runs during auto
+ *
+ * This is an example autonomous routine which demonstrates a lot of the features LemLib has to offer
+ */
+void autonomous() {
+}
+
 void opcontrol() {
-    static int lastLeft = 0;
-    static int lastRight = 0;
-
+    
     while (true) {
-        // --- READ JOYSTICKS ---
-        int leftY = controller.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y);
-        int rightY = controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y);
+        
+        // =====================================================================
+        // ============================ CHASSIS DRIVE ===========================
+        // =====================================================================
+        ChassisDrive();
+       
+        // =====================================================================
+        // ============================ INTAKE & PNEU ===========================
+        // =====================================================================
 
-        // --- DEADZONE ---
-        if (abs(leftY) < joystickDeadzone) leftY = 0;
-        if (abs(rightY) < joystickDeadzone) rightY = 0;
+        intakeControl(); // call intake control function
 
-        // --- RAMP FILTER ---
-        leftY = lastLeft + std::clamp(leftY - lastLeft, -rampStep, rampStep);
-        rightY = lastRight + std::clamp(rightY - lastRight, -rampStep, rampStep);
-        lastLeft = leftY;
-        lastRight = rightY;
-
-        // --- SPEED MODES ---
-        double speedMultiplier = 1.0;
-       if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1)) 
-    speedMultiplier = 1.27;     // Turbo priority
-else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) 
-    speedMultiplier = 0.5;      // Precision
-else 
-    speedMultiplier = 1.0;      // Normal
-
-        // --- APPLY EXPONENTIAL CURVE ---
-        leftY = applyExponential(leftY);
-        rightY = applyExponential(rightY);
-
-        // --- DRIVE TANK ---
-        chassis.tank(leftY * speedMultiplier, rightY * speedMultiplier);
-
-        // --- INTAKE CONTROL ---
-        // Intake motors: intakeStage1 (port 8), intakeStage2 (port 9)
-        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
-            // Intake in
-            intakeStage1.move(127);
-            intakeStage2.move(-127); // opposite direction
-        } 
-        else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
-            // Outtake
-            intakeStage1.move(-127);
-            intakeStage2.move(127);
-        } 
-        else {
-            // Stop intake
-            intakeStage1.brake();
-            intakeStage2.brake();
-        }
-
-        // --- TELEMETRY ---
-        pros::lcd::print(0, "Left: %d | Right: %d", leftY, rightY);
-        pros::lcd::print(1, "Speed Mode: %s", 
-            controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1) ? "TURBO" :
-            (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1) ? "Precision" : "Normal"));
-        pros::lcd::print(2, "Intake: %s",
-            controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2) ? "In" :
-            (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2) ? "Out" : "Stopped"));
-
+        pneumaticsControl(); // call pneumatics control function
+        
         pros::delay(10);
     }
 }
-
-// --------- AUTONOMOUS ---------
-void autonomous() {}
