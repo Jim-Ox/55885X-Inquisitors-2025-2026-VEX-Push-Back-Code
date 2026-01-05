@@ -1,4 +1,5 @@
 #include "main.h"
+#include "auton.hpp"
 #include "lemlib/api.hpp" // IWYU pragma: keep
 #include "lemlib/chassis/chassis.hpp"
 #include "lemlib/chassis/trackingWheel.hpp"
@@ -12,25 +13,25 @@
 pros::Controller controller(pros::E_CONTROLLER_MASTER);
 
 // motor groups
-pros::MotorGroup rightMotors({1, 2, 3}, pros::MotorGearset::blue); // left motor group - ports 3 (reversed), 4, 5 (reversed)
-pros::MotorGroup leftMotors({-4, -6, -7}, pros::MotorGearset::blue); // right motor group - ports 6, 7, 9 (reversed)
+pros::MotorGroup rightMotors({1, 2, 3}, pros::MotorGearset::blue); // left motor group - ports 1,2,3
+pros::MotorGroup leftMotors({-4, -6, -7}, pros::MotorGearset::blue); // right motor group - ports 4,6,7 (reversed) (port 5 doesn't work)
 
 //Intake motors
 pros::Motor intakeMotor1(8, pros::MotorGearset::blue); // Intake motor on port 8
-pros::Motor intakeMotor2(-9, pros::MotorGearset::green); // Intake motor on port 9
-pros::Motor intakeMotor3(10, pros::MotorGearset::green); // Indexer motor on port 10
+pros::Motor intakeMotor2(-9, pros::MotorGearset::green); // Intake half motor on port 9
+pros::Motor intakeMotor3(10, pros::MotorGearset::green); // Indexer half motor on port 10
 
 // pneumatics
 pros::adi::DigitalOut Descore1('A', false); // Descore Piston left on port A
 pros::adi::DigitalOut Descore2('B', false); // Descore Piston right on port B
 pros::adi::DigitalOut Park('C', false); // Park Piston left on port C
-pros::adi::DigitalOut Pistonlift('D', false); // Intake lift Piston right on port
+pros::adi::DigitalOut Pistonlift('D', false); // Intake lift Piston right on port D
 pros::adi::DigitalOut LTC('H', false); // LTC deploy piston on port H
 
 //optical sensor
-pros::Optical opticalSensor(13); // Optical sensor on port 13
+pros::Optical opticalSensor(13); // Optical sensor on port 13 (doesn't seem to work?)
 
-// Inertial Sensor on port 10
+// Inertial Sensor on port 20
 pros::Imu imu(20);
 
 // tracking wheels
@@ -40,7 +41,7 @@ pros::Imu imu(20);
 pros::Rotation verticalEnc(-21);
 // horizontal tracking wheel. 2.75" diameter, 5.75" offset, back of the robot (negative)
 //lemlib::TrackingWheel horizontal(&horizontalEnc, lemlib::Omniwheel::NEW_275, -5);
-// vertical tracking wheel. 2.75" diameter, 2.5" offset, left of the robot (negative)
+// vertical tracking wheel. 2.75" diameter, 0.5" offset, left of the robot (negative)
 lemlib::TrackingWheel vertical(&verticalEnc, lemlib::Omniwheel::NEW_275, 0.5);
 
 // drivetrain settings
@@ -57,10 +58,10 @@ lemlib::ControllerSettings linearController(10, // proportional gain (kP) 10
                                             0, // integral gain (kI)
                                             2, // derivative gain (kD) 2
                                             0, // anti windup
-                                            0, // small error range, in inches
-                                            0, // small error range timeout, in milliseconds
-                                            0, // large error range, in inches
-                                            0, // large error range timeout, in milliseconds
+                                            1, // small error range, in inches
+                                            100, // small error range timeout, in milliseconds
+                                            3, // large error range, in inches
+                                            500, // large error range timeout, in milliseconds
                                             0 // maximum acceleration (slew)
 );
 
@@ -69,10 +70,10 @@ lemlib::ControllerSettings angularController(10, // proportional gain (kP) 10
                                              0, // integral gain (kI)
                                              93.1875, // derivative gain (kD) 93.1875
                                              0, // anti windup
-                                             0, // small error range, in degrees
-                                             0, // small error range timeout, in milliseconds
-                                             0, // large error range, in degrees
-                                             0, // large error range timeout, in milliseconds
+                                             1, // small error range, in degrees
+                                             100, // small error range timeout, in milliseconds
+                                             3, // large error range, in degrees
+                                             500, // large error range timeout, in milliseconds
                                              0 // maximum acceleration (slew)
 );
 
@@ -120,10 +121,9 @@ void initialize() {
         pros::delay(2000);
     }
 
-    /*
-    horizontalEnc.reset_position();
+    //horizontalEnc.reset_position();
     verticalEnc.reset_position();
-*/
+
     // --- LemLib Calibration ---
     chassis.calibrate();
 
@@ -143,10 +143,13 @@ void initialize() {
         }
     });
     
+    // --- Auton Selector ---
     AutonSelector();
 
-    // Set optical sensor LED to maximum brightness
-    opticalSensor.set_led_pwm(100);
+    /* Set optical sensor LED to maximum brightness,
+    tuned off for now due to battery drain and optical sensor not connecting properly
+    */
+    //opticalSensor.set_led_pwm(100);
 }
 
 // This function is called when the robot is disabled.
@@ -159,6 +162,8 @@ void disabled() {
     }
 }
 
+// This function is called when the robot is enabled in the field or
+// during operator control.
 void competition_initialize() {}
 
 // get a path used for pure pursuit
@@ -166,12 +171,10 @@ void competition_initialize() {}
 //ASSET(example_txt); // '.' replaced with "_" to make c++ happy
 
 /**
- * Runs during auto
- *
- * This is an example autonomous routine which demonstrates a lot of the features LemLib has to offer
+ * Runs during autonomous mode
  */
 void autonomous() {
-    runSelectedAuton();
+    runAuton(screenstate);
 }
 
 void opcontrol() {
