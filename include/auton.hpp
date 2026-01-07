@@ -3,17 +3,11 @@
 #include <vector>
 #include "pros/llemu.hpp"
 #include "pros/apix.h"
+#include "lemlib/chassis/chassis.hpp"
+#include "lemlib/chassis/trackingWheel.hpp"
 
 using namespace std;
 class Auton;
-
-/*
-This will have all the variables and functions related to autonomous
-*/
-
-extern int screenstate;
-extern uint8_t last_state;
-extern uint8_t state;
 
 // Type alias for auton functions using 
 using AutonFunc = void(*)();
@@ -24,14 +18,22 @@ struct AutonEntry {
     AutonFunc func; 
 };
 
-// Declare globals variables
+// Declaration of variables
 extern int screenstate;
 extern const AutonEntry autonTable[];
+extern uint8_t last_state;
+extern uint8_t state;
+
+extern const double Field_wall;
+extern const double Sensor_offset;
 
 // Function declarations 
 void runAuton(int auton); 
 void Screen_Display();
 void AutonSelector();
+
+void resetYFromWall(lemlib::Chassis& chassis);
+void resetXFromWall(lemlib::Chassis& chassis);
 
 //auton routines
 void testAuton();

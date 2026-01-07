@@ -78,6 +78,7 @@ extern pros::Controller controller;
 extern pros::MotorGroup leftMotors;
 extern pros::MotorGroup rightMotors;
 extern pros::Optical opticalSensor;
+extern pros::Distance distanceSensor;
 extern pros::Imu imu;
 extern pros::Motor intakeMotor1;
 extern pros::Motor intakeMotor2;
