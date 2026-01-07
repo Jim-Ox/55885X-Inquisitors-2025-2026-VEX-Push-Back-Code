@@ -31,6 +31,9 @@ pros::adi::DigitalOut LTC('H', false); // LTC deploy piston on port H
 //optical sensor
 pros::Optical opticalSensor(13); // Optical sensor on port 13 (doesn't seem to work?)
 
+//distance sensor
+pros::Distance distanceSensor(18); // Distance sensor on port 18
+
 // Inertial Sensor on port 20
 pros::Imu imu(20);
 
