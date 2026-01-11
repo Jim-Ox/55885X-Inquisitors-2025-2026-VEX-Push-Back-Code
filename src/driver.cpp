@@ -14,7 +14,7 @@ void ChassisDrive(){
 
     // joystick read
     int leftY = controller.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y);
-    int rightY = controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y);
+    int rightY = controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
 
     // =====================================================================
     // ======================= IMU STRAIGHT LINE ASSIST =====================
@@ -53,8 +53,8 @@ void ChassisDrive(){
         if (correction < -20.0) correction = -20.0;
     }
 
-    // apply correction to tank drive (left, right)
-    chassis.tank(leftY + (int)correction, rightY - (int)correction);
+    // apply correction to arcade drive (left, right)
+    chassis.arcade(leftY + (int)correction, rightY - (int)correction);
     
     pros::delay(10);
 }

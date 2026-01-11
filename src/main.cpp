@@ -59,19 +59,19 @@ lemlib::Drivetrain drivetrain(&leftMotors, // left motor group
 // lateral motion controller
 lemlib::ControllerSettings linearController(10, // proportional gain (kP) 10
                                             0, // integral gain (kI)
-                                            2, // derivative gain (kD) 2
+                                            44, // derivative gain (kD) 15
                                             0, // anti windup
-                                            1, // small error range, in inches
-                                            100, // small error range timeout, in milliseconds
-                                            3, // large error range, in inches
-                                            500, // large error range timeout, in milliseconds
+                                            0, // small error range, in inches 1
+                                            0, // small error range timeout, in milliseconds 100
+                                            0, // large error range, in inches 3
+                                            0, // large error range timeout, in milliseconds 500
                                             0 // maximum acceleration (slew)
 );
 
 // angular motion controller
-lemlib::ControllerSettings angularController(10, // proportional gain (kP) 10
+lemlib::ControllerSettings angularController(9, // proportional gain (kP) 9
                                              0, // integral gain (kI)
-                                             93.1875, // derivative gain (kD) 93.1875
+                                             87, // derivative gain (kD) 87
                                              0, // anti windup
                                              1, // small error range, in degrees
                                              100, // small error range timeout, in milliseconds
@@ -153,6 +153,9 @@ void initialize() {
     tuned off for now due to battery drain and optical sensor not connecting properly
     */
     //opticalSensor.set_led_pwm(100);
+
+    // Set origin based on distance sensor reading
+    resetOrigin();
 }
 
 // This function is called when the robot is disabled.
@@ -183,6 +186,7 @@ void autonomous() {
 void opcontrol() {
     
     while (true) {
+        //for testing auton (remove later)
         if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_LEFT)) {
             autonomous();
         }
@@ -190,7 +194,12 @@ void opcontrol() {
         // =====================================================================
         // ============================ CHASSIS DRIVE ===========================
         // =====================================================================
-        ChassisDrive();
+        //ChassisDrive(); //for arcade drive only
+
+        // tank drive
+        int leftY = controller.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y);
+        int rightY = controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y);
+        chassis.tank(leftY, rightY);
        
         // =====================================================================
         // ============================ INTAKE & PNEU ===========================

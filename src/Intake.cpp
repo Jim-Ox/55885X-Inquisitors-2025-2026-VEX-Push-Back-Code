@@ -71,12 +71,25 @@ void intakeControl(){
     pros::delay(10);
 }
 
-void IntakeSpin(int velocity){
-    anti_jamIntake(); // call anti jam intake function
+// ---Intake functions for auton---
+
+//side goal intake function
+void Intake(int velocity){
+    //anti_jamIntake(); // call anti jam intake function
 
     intakeMotor1.move_velocity(velocity);
     intakeMotor2.move_velocity(velocity);
     intakeMotor3.move_velocity(velocity);
     pros::delay(10);
 
+}
+
+//center goal intake function
+void Center_Intake(int velocity){
+    //anti_jamIntake(); // call anti jam intake function
+
+    intakeMotor1.move_velocity(velocity);
+    intakeMotor2.move_velocity(velocity);
+    intakeMotor3.move_velocity(-velocity);
+    pros::delay(10);
 }
