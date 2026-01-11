@@ -1,7 +1,9 @@
+#include "liblvgl/llemu.hpp"
 #include "main.h"
 #include "auton.hpp"
 #include "pros/llemu.hpp"
 #include "pros/rtos.h"
+#include <cstdint>
 #include <cstdlib>
 
 /* Autonomous Selector screen page
@@ -30,39 +32,42 @@ constexpr int AUTON_COUNT = sizeof(autonTable) / sizeof(AutonEntry);
 
 //display selected auton on LCD
 void Screen_Display(){
-    if (screenstate == AUTON_COUNT) { 
-        pros::lcd::print(4, "No Auton Selected"); 
-    } else { 
-        pros::lcd::print(4, autonTable[screenstate].name); 
+    if (screenstate >= 0 && screenstate < AUTON_COUNT) {
+        pros::lcd::print(3, "Selected Auton:");
+        pros::lcd::print(4, "%s", autonTable[screenstate].name);
+    } else {
+        pros::lcd::print(3, "Selected Auton:");
+        pros::lcd::print(4, "No Auton");
     }
 }
 
 // Autonomous Selector screen page
 void AutonSelector(){
+    uint8_t state = 0;
+    uint8_t kdown = 0;
     uint8_t last_state = 0;
+    int maxState = 0;
+    pros::lcd::clear_line(4-6);
 
     while(true) {
         // read the buttons
-        uint8_t state = pros::lcd::read_buttons();
-        uint8_t kdown = state & (~last_state);
-        last_state = state;
+        uint8_t state = pros::lcd::read_buttons(); // get current buttons pressed
+        uint8_t kdown = state & (~last_state); // detect newly pressed buttons
+        last_state = state; // update last state
+        int maxState = AUTON_COUNT + 1; // +1 for "No Auton Selected" option (prevents screen getting stuck on "no auton" option)
 
-        if (kdown & LCD_BTN_LEFT) { 
-            screenstate--; 
-            if (screenstate < 0) 
-            screenstate = AUTON_COUNT; // wrap to "No Auton" 
-        } 
-        
-        if (kdown & LCD_BTN_RIGHT) { 
-            screenstate++; 
-            if (screenstate > AUTON_COUNT) screenstate = 0; 
-        }
+        if (kdown & LCD_BTN_LEFT)
+            screenstate = (screenstate - 1 + maxState) % maxState;
+
+        if (kdown & LCD_BTN_RIGHT)
+            screenstate = (screenstate + 1) % maxState;
         
         // center button to confirm selection
         if (kdown & LCD_BTN_CENTER) {
             // confirm selection
             if (screenstate == AUTON_COUNT) { 
                 pros::lcd::print(6, "No Auton Selected");
+                break;
             } else { 
                 pros::lcd::print(6, "Auton Selected!"); 
                 break; 
